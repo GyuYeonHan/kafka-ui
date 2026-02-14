@@ -34,11 +34,44 @@ interface FormValues {
   config: string;
 }
 
+const getErrorMessage = async (error: unknown): Promise<string> => {
+  if (error instanceof Response) {
+    try {
+      const body = await error.json();
+      if (body?.message) {
+        return body.message;
+      }
+    } catch {
+      // do nothing
+    }
+    return `${error.status} ${error.statusText}`;
+  }
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+
+  return 'Failed to create connector';
+};
+
 const New: React.FC = () => {
   const { clusterName } = useAppParams<ClusterNameRoute>();
   const navigate = useNavigate();
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
 
-  const { data: connects = [] } = useConnects(clusterName);
+  const {
+    data: connects = [],
+    isError: isConnectsError,
+    isLoading: isConnectsLoading,
+    isFetching: isConnectsFetching,
+  } = useConnects(clusterName);
+  const isConnectsPending =
+    isConnectsLoading || (isConnectsFetching && connects.length === 0);
   const mutation = useCreateConnector(clusterName);
 
   const methods = useForm<FormValues>({
@@ -65,6 +98,7 @@ const New: React.FC = () => {
   }, [connects, getValues, setValue]);
 
   const onSubmit = async (values: FormValues) => {
+    setSubmitError(null);
     try {
       const connector = await mutation.createResource({
         connectName: values.connectName,
@@ -84,7 +118,7 @@ const New: React.FC = () => {
         );
       }
     } catch (e) {
-      // do nothing
+      setSubmitError(await getErrorMessage(e));
     }
   };
 
@@ -110,13 +144,13 @@ const New: React.FC = () => {
             defaultValue={connectOptions[0]?.value}
             control={control}
             name="connectName"
-            render={({ field: { name, onChange } }) => (
+            render={({ field: { name, onChange, value } }) => (
               <Select
                 selectSize="M"
                 name={name}
                 disabled={isSubmitting}
                 onChange={onChange}
-                value={connectOptions[0]?.value}
+                value={value}
                 minWidth="100%"
                 options={connectOptions}
               />
@@ -155,11 +189,32 @@ const New: React.FC = () => {
             <ErrorMessage errors={errors} name="config" />
           </FormError>
         </div>
+        {isConnectsError && (
+          <FormError>
+            Failed to load Kafka Connect clusters. Please check Connect status.
+          </FormError>
+        )}
+        {isConnectsPending && (
+          <FormError>Loading Kafka Connect clusters...</FormError>
+        )}
+        {!isConnectsPending && !isConnectsError && connects.length === 0 && (
+          <FormError>
+            No Kafka Connect clusters are configured for this cluster.
+          </FormError>
+        )}
+        {submitError && <FormError>{submitError}</FormError>}
         <Button
           buttonSize="M"
           buttonType="primary"
           type="submit"
-          disabled={!isValid || isSubmitting || !isDirty}
+          disabled={
+            !isValid ||
+            isSubmitting ||
+            !isDirty ||
+            isConnectsPending ||
+            isConnectsError ||
+            connects.length === 0
+          }
         >
           Submit
         </Button>

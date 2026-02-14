@@ -8,6 +8,7 @@ import com.provectus.kafka.ui.exception.ValidationException;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import java.io.FileInputStream;
+import java.time.Duration;
 import java.security.KeyStore;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
@@ -110,6 +111,11 @@ public class WebClientConfigurator {
 
   public WebClientConfigurator configureBufferSize(DataSize maxBuffSize) {
     builder.codecs(c -> c.defaultCodecs().maxInMemorySize((int) maxBuffSize.toBytes()));
+    return this;
+  }
+
+  public WebClientConfigurator configureResponseTimeout(Duration timeout) {
+    httpClient = httpClient.responseTimeout(timeout);
     return this;
   }
 

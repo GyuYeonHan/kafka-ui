@@ -44,10 +44,24 @@ const connectorTasksKey = (props: UseConnectorProps) => [
   ...connectorKey(props),
   'tasks',
 ];
+const BASE_CONNECT_QUERY_OPTIONS = {
+  suspense: false,
+  retry: 1,
+  refetchOnMount: true,
+  refetchOnWindowFocus: true,
+  staleTime: 0,
+} as const;
+const CONNECT_POLL_INTERVAL_MS = 15000;
 
 export function useConnects(clusterName: ClusterName) {
-  return useQuery(connectsKey(clusterName), () =>
-    api.getConnects({ clusterName })
+  return useQuery(
+    connectsKey(clusterName),
+    () => api.getConnects({ clusterName }),
+    {
+      ...BASE_CONNECT_QUERY_OPTIONS,
+      refetchInterval: 30000,
+      refetchIntervalInBackground: true,
+    }
   );
 }
 export function useConnectors(clusterName: ClusterName, search?: string) {
@@ -55,18 +69,29 @@ export function useConnectors(clusterName: ClusterName, search?: string) {
     connectorsKey(clusterName, search),
     () => api.getAllConnectors({ clusterName, search }),
     {
+      ...BASE_CONNECT_QUERY_OPTIONS,
+      keepPreviousData: true,
+      refetchInterval: CONNECT_POLL_INTERVAL_MS,
+      refetchIntervalInBackground: true,
       select: (data) => sortBy(data, 'name'),
     }
   );
 }
 export function useConnector(props: UseConnectorProps) {
-  return useQuery(connectorKey(props), () => api.getConnector(props));
+  return useQuery(connectorKey(props), () => api.getConnector(props), {
+    ...BASE_CONNECT_QUERY_OPTIONS,
+    refetchInterval: CONNECT_POLL_INTERVAL_MS,
+    refetchIntervalInBackground: true,
+  });
 }
 export function useConnectorTasks(props: UseConnectorProps) {
   return useQuery(
     connectorTasksKey(props),
     () => api.getConnectorTasks(props),
     {
+      ...BASE_CONNECT_QUERY_OPTIONS,
+      refetchInterval: CONNECT_POLL_INTERVAL_MS,
+      refetchIntervalInBackground: true,
       select: (data) => sortBy(data, 'status.id'),
     }
   );
@@ -91,8 +116,12 @@ export function useRestartConnectorTask(props: UseConnectorProps) {
   );
 }
 export function useConnectorConfig(props: UseConnectorProps) {
-  return useQuery([...connectorKey(props), 'config'], () =>
-    api.getConnectorConfig(props)
+  return useQuery(
+    [...connectorKey(props), 'config'],
+    () => api.getConnectorConfig(props),
+    {
+      ...BASE_CONNECT_QUERY_OPTIONS,
+    }
   );
 }
 export function useUpdateConnectorConfig(props: UseConnectorProps) {

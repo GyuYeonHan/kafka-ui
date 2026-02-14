@@ -10,15 +10,17 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import ActionsCell from './ActionsCell';
 import TopicsCell from './TopicsCell';
 import RunningTasksCell from './RunningTasksCell';
+import FailedTasksCell from './FailedTasksCell';
 
 const List: React.FC = () => {
   const navigate = useNavigate();
   const { clusterName } = useAppParams<ClusterNameRoute>();
   const [searchParams] = useSearchParams();
-  const { data: connectors } = useConnectors(
+  const { data: connectors, isError, isLoading, isFetching } = useConnectors(
     clusterName,
     searchParams.get('q') || ''
   );
+  const isConnectorsLoading = isLoading || (isFetching && !connectors);
 
   const columns = React.useMemo<ColumnDef<FullConnectorInfo>[]>(
     () => [
@@ -29,6 +31,7 @@ const List: React.FC = () => {
       { header: 'Topics', cell: TopicsCell },
       { header: 'Status', accessorKey: 'status.state', cell: TagCell },
       { header: 'Running Tasks', cell: RunningTasksCell },
+      { header: 'Failed Tasks', cell: FailedTasksCell },
       { header: '', id: 'action', cell: ActionsCell },
     ],
     []
@@ -36,13 +39,19 @@ const List: React.FC = () => {
 
   return (
     <Table
-      data={connectors || []}
+      data={isConnectorsLoading ? [] : connectors || []}
       columns={columns}
       enableSorting
       onRowClick={({ original: { connect, name } }) =>
         navigate(clusterConnectConnectorPath(clusterName, connect, name))
       }
-      emptyMessage="No connectors found"
+      emptyMessage={
+        isConnectorsLoading
+          ? 'Loading connectors...'
+          : isError
+          ? 'Failed to load connectors. Please check Kafka Connect status.'
+          : 'No connectors found'
+      }
     />
   );
 };

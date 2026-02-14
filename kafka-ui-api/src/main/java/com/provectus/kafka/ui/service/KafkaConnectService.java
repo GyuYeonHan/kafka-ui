@@ -24,6 +24,7 @@ import com.provectus.kafka.ui.model.NewConnectorDTO;
 import com.provectus.kafka.ui.model.TaskDTO;
 import com.provectus.kafka.ui.model.connect.InternalConnectInfo;
 import com.provectus.kafka.ui.util.ReactiveFailover;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,6 +35,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
@@ -43,6 +45,12 @@ import reactor.core.publisher.Mono;
 @Slf4j
 @RequiredArgsConstructor
 public class KafkaConnectService {
+  @Value("${kafka.connect.names-timeout-ms:15000}")
+  private long connectorNamesTimeoutMs = 15000;
+
+  @Value("${kafka.connect.details-timeout-ms:30000}")
+  private long connectorDetailsTimeoutMs = 30000;
+
   private final ClusterMapper clusterMapper;
   private final KafkaConnectMapper kafkaConnectMapper;
   private final ObjectMapper objectMapper;
@@ -62,20 +70,35 @@ public class KafkaConnectService {
         .flatMap(connect ->
             getConnectorNamesWithErrorsSuppress(cluster, connect.getName())
                 .flatMap(connectorName ->
-                    Mono.zip(
-                        getConnector(cluster, connect.getName(), connectorName),
-                        getConnectorConfig(cluster, connect.getName(), connectorName),
-                        getConnectorTasks(cluster, connect.getName(), connectorName).collectList(),
-                        getConnectorTopics(cluster, connect.getName(), connectorName)
-                    ).map(tuple ->
-                        InternalConnectInfo.builder()
-                            .connector(tuple.getT1())
-                            .config(tuple.getT2())
-                            .tasks(tuple.getT3())
-                            .topics(tuple.getT4().getTopics())
-                            .build())))
+                    loadConnectorInfo(cluster, connect.getName(), connectorName)
+                        .timeout(connectorDetailsTimeout())
+                        .onErrorResume(error -> {
+                          log.warn(
+                              "Failed to load connector '{}' from connect '{}' in cluster '{}'. "
+                                  + "Skipping connector from list.",
+                              connectorName, connect.getName(), cluster.getName(), error
+                          );
+                          return Mono.empty();
+                        })))
         .map(kafkaConnectMapper::fullConnectorInfo)
         .filter(matchesSearchTerm(search));
+  }
+
+  private Mono<InternalConnectInfo> loadConnectorInfo(KafkaCluster cluster,
+                                                      String connectName,
+                                                      String connectorName) {
+    return Mono.zip(
+        getConnector(cluster, connectName, connectorName),
+        getConnectorConfig(cluster, connectName, connectorName),
+        getConnectorTasks(cluster, connectName, connectorName).collectList(),
+        getConnectorTopics(cluster, connectName, connectorName)
+    ).map(tuple ->
+        InternalConnectInfo.builder()
+            .connector(tuple.getT1())
+            .config(tuple.getT2())
+            .tasks(tuple.getT3())
+            .topics(tuple.getT4().getTopics())
+            .build());
   }
 
   private Predicate<FullConnectorInfoDTO> matchesSearchTerm(@Nullable final String search) {
@@ -115,7 +138,24 @@ public class KafkaConnectService {
 
   // returns empty flux if there was an error communicating with Connect
   public Flux<String> getConnectorNamesWithErrorsSuppress(KafkaCluster cluster, String connectName) {
-    return getConnectorNames(cluster, connectName).onErrorComplete();
+    return getConnectorNames(cluster, connectName)
+        .timeout(connectorNamesTimeout())
+        .onErrorResume(error -> {
+          log.warn(
+              "Failed to load connector names from connect '{}' in cluster '{}'. "
+                  + "Skipping connect from list.",
+              connectName, cluster.getName(), error
+          );
+          return Flux.empty();
+        });
+  }
+
+  private Duration connectorNamesTimeout() {
+    return Duration.ofMillis(Math.max(1000, connectorNamesTimeoutMs));
+  }
+
+  private Duration connectorDetailsTimeout() {
+    return Duration.ofMillis(Math.max(1000, connectorDetailsTimeoutMs));
   }
 
   @SneakyThrows
