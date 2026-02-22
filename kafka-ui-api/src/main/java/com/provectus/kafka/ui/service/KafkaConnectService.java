@@ -17,7 +17,9 @@ import com.provectus.kafka.ui.model.ConnectorDTO;
 import com.provectus.kafka.ui.model.ConnectorPluginConfigValidationResponseDTO;
 import com.provectus.kafka.ui.model.ConnectorPluginDTO;
 import com.provectus.kafka.ui.model.ConnectorStateDTO;
+import com.provectus.kafka.ui.model.ConnectorStatusDTO;
 import com.provectus.kafka.ui.model.ConnectorTaskStatusDTO;
+import com.provectus.kafka.ui.model.ConnectorTypeDTO;
 import com.provectus.kafka.ui.model.FullConnectorInfoDTO;
 import com.provectus.kafka.ui.model.KafkaCluster;
 import com.provectus.kafka.ui.model.NewConnectorDTO;
@@ -63,10 +65,38 @@ public class KafkaConnectService {
             getConnectorNamesWithErrorsSuppress(cluster, connect.getName())
                 .flatMap(connectorName ->
                     Mono.zip(
-                        getConnector(cluster, connect.getName(), connectorName),
-                        getConnectorConfig(cluster, connect.getName(), connectorName),
-                        getConnectorTasks(cluster, connect.getName(), connectorName).collectList(),
+                        getConnector(cluster, connect.getName(), connectorName)
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(new ConnectorDTO()
+                                  .name(connectorName)
+                                  .connect(connect.getName())
+                                  .type(ConnectorTypeDTO.SOURCE)
+                                  .status(new ConnectorStatusDTO()
+                                      .state(ConnectorStateDTO.FAILED))
+                                  .tasks(List.of())
+                                  .config(Map.of()));
+                            }),
+                        getConnectorConfig(cluster, connect.getName(), connectorName)
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch config for connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(Map.of());
+                            }),
+                        getConnectorTasks(cluster, connect.getName(), connectorName)
+                            .collectList()
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch tasks for connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(List.of());
+                            }),
                         getConnectorTopics(cluster, connect.getName(), connectorName)
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch topics for connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(new ConnectorTopics().topics(List.of()));
+                            })
                     ).map(tuple ->
                         InternalConnectInfo.builder()
                             .connector(tuple.getT1())
