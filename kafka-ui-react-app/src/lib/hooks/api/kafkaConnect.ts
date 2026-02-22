@@ -101,6 +101,7 @@ export function useUpdateConnectorConfig(props: UseConnectorProps) {
     (requestBody: Connector['config']) =>
       api.setConnectorConfig({ ...props, requestBody }),
     {
+      meta: { hideError: true },
       onSuccess: () => {
         showSuccessAlert({
           message: `Config successfully updated.`,
@@ -116,6 +117,7 @@ function useCreateConnectorMutation(clusterName: ClusterName) {
     (props: CreateConnectorProps) =>
       api.createConnector({ ...props, clusterName }),
     {
+      meta: { hideError: true },
       onSuccess: () => client.invalidateQueries(connectorsKey(clusterName)),
     }
   );

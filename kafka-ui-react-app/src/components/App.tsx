@@ -12,7 +12,7 @@ import Dashboard from 'components/Dashboard/Dashboard';
 import ClusterPage from 'components/ClusterPage/ClusterPage';
 import { ThemeProvider } from 'styled-components';
 import { theme, darkTheme } from 'theme/theme';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, MutationCache } from '@tanstack/react-query';
 import { showServerError } from 'lib/errorHandling';
 import { Toaster } from 'react-hot-toast';
 import GlobalCSS from 'components/globalCss';
@@ -28,15 +28,19 @@ import { UserInfoRolesAccessProvider } from './contexts/UserInfoRolesAccessConte
 import PageContainer from './PageContainer/PageContainer';
 
 const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    onError: (error, _variables, _context, mutation) => {
+      // Suppress global error popup for 400 Bad Request if hideError meta is set
+      if (mutation.meta?.hideError && (error as Response).status === 400) {
+        return;
+      }
+      showServerError(error as Response);
+    },
+  }),
   defaultOptions: {
     queries: {
       suspense: true,
       networkMode: 'offlineFirst',
-      onError(error) {
-        showServerError(error as Response);
-      },
-    },
-    mutations: {
       onError(error) {
         showServerError(error as Response);
       },

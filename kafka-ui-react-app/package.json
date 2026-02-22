@@ -25,6 +25,7 @@
     "jsonpath-plus": "^7.2.0",
     "lodash": "^4.17.21",
     "lossless-json": "^2.0.8",
+    "lucide-react": "^0.575.0",
     "pretty-ms": "7.0.1",
     "react": "^18.1.0",
     "react-ace": "^10.1.0",
@@ -106,7 +107,7 @@
     "vite-plugin-ejs": "^1.6.4"
   },
   "engines": {
-    "node": "v18.17.1",
-    "pnpm": "^8.6.12"
+    "node": ">=18.17.1",
+    "pnpm": ">=8.6.12"
   }
 }

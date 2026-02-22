@@ -61,7 +61,9 @@ public class RetryingKafkaConnectClient extends KafkaConnectClientApi {
   private static <T> Mono<T> withBadRequestErrorHandling(Mono<T> publisher) {
     return publisher
         .onErrorResume(WebClientResponseException.BadRequest.class, e ->
-            Mono.error(new ValidationException("Invalid configuration")))
+            Mono.error(new ValidationException(e.getResponseBodyAsString().contains("message") 
+                ? e.getResponseBodyAs(Map.class).get("message").toString() 
+                : "Invalid configuration")))
         .onErrorResume(WebClientResponseException.InternalServerError.class, e ->
             Mono.error(new ValidationException("Invalid configuration")));
   }

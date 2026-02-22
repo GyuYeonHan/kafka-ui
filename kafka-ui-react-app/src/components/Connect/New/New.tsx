@@ -17,9 +17,13 @@ import Input from 'components/common/Input/Input';
 import { Button } from 'components/common/Button/Button';
 import PageHeading from 'components/common/PageHeading/PageHeading';
 import Heading from 'components/common/heading/Heading.styled';
+import { useQueryClient } from '@tanstack/react-query';
 import { useConnects, useCreateConnector } from 'lib/hooks/api/kafkaConnect';
 import get from 'lodash/get';
-import { Connect } from 'generated-sources';
+import { Connect, ConnectorPluginConfig } from 'generated-sources';
+import { kafkaConnectApiClient as connectApi } from 'lib/api';
+import { showAlert, getResponse, showServerError } from 'lib/errorHandling';
+import { AlertTriangle } from 'lucide-react';
 
 import * as S from './New.styled';
 
@@ -34,12 +38,20 @@ interface FormValues {
   config: string;
 }
 
+interface ConfigFieldError {
+  name: string;
+  errors: string[];
+}
+
 const New: React.FC = () => {
   const { clusterName } = useAppParams<ClusterNameRoute>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data: connects = [] } = useConnects(clusterName);
   const mutation = useCreateConnector(clusterName);
+  const [configErrors, setConfigErrors] = React.useState<ConfigFieldError[]>([]);
+  const [globalError, setGlobalError] = React.useState<string | null>(null);
 
   const methods = useForm<FormValues>({
     mode: 'all',
@@ -64,13 +76,75 @@ const New: React.FC = () => {
     }
   }, [connects, getValues, setValue]);
 
+  const fetchValidationErrors = async (
+    connectName: string,
+    parsedConfig: Record<string, string>
+  ): Promise<boolean> => {
+    const pluginName = parsedConfig['connector.class'];
+    if (!pluginName) return false;
+
+    try {
+      const basePath = window.basePath || '';
+      const url = `${basePath}/api/clusters/${encodeURIComponent(
+        clusterName
+      )}/connects/${encodeURIComponent(
+        connectName
+      )}/plugins/${encodeURIComponent(pluginName)}/config/validate`;
+
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(parsedConfig),
+      });
+
+      if (!response.ok) return false;
+
+      const validation = await response.json();
+      const configs = validation.configs ?? [];
+
+      const fieldErrors: ConfigFieldError[] = configs
+        .filter(
+          (c: any) =>
+            c.value &&
+            (c.value.errors ?? []) &&
+            (c.value.errors ?? []).length > 0
+        )
+        .map((c: any) => ({
+          name: c.value?.name || 'unknown',
+          errors: c.value?.errors || [],
+        }));
+
+      if (fieldErrors.length > 0) {
+        setConfigErrors(fieldErrors);
+        return true;
+      } else {
+        setConfigErrors([]);
+        return false;
+      }
+    } catch {
+      // Ignore validation fetch errors
+      return false;
+    }
+  };
+
   const onSubmit = async (values: FormValues) => {
+    setConfigErrors([]);
+    setGlobalError(null);
+
+    let parsedConfig: Record<string, string>;
+    try {
+      parsedConfig = JSON.parse(values.config.trim());
+    } catch {
+      return;
+    }
+
     try {
       const connector = await mutation.createResource({
         connectName: values.connectName,
         newConnector: {
           name: values.name,
-          config: JSON.parse(values.config.trim()),
+          config: parsedConfig,
         },
       });
 
@@ -83,8 +157,38 @@ const New: React.FC = () => {
           )
         );
       }
-    } catch (e) {
-      // do nothing
+    } catch (e: any) {
+      // 1. Fetch field-level validation errors
+      const hasFieldErrors = await fetchValidationErrors(values.connectName, parsedConfig);
+
+      // 2. Extract error message (handle JSON or Plaintext)
+      let message = '';
+      if (e instanceof Response) {
+        try {
+          // Use clone to preserve the stream. 
+          const text = await e.clone().text();
+          try {
+            const body = JSON.parse(text);
+            message = body.message || text;
+          } catch {
+            message = text;
+          }
+        } catch {
+          message = `${e.status} ${e.statusText}`;
+        }
+      } else {
+        message = e.message || 'Unknown error';
+      }
+
+      // 3. If field-level errors are shown below, truncate to just the summary
+      if (hasFieldErrors) {
+        const match = message.match(/^(.*?\d+\s+error\(s\):?)/);
+        if (match) {
+          message = match[1];
+        }
+      }
+
+      setGlobalError(message);
     }
   };
 
@@ -151,15 +255,79 @@ const New: React.FC = () => {
               <Editor {...field} readOnly={isSubmitting} ref={null} />
             )}
           />
-          <FormError>
-            <ErrorMessage errors={errors} name="config" />
-          </FormError>
+          {(configErrors.length > 0 || globalError || errors.config) && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '16px',
+                background: 'rgba(255, 77, 79, 0.05)',
+                border: '1px solid rgba(255, 77, 79, 0.2)',
+                borderRadius: '8px',
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 600,
+                  marginBottom: '12px',
+                  color: '#ff4d4f',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                }}
+              >
+                <AlertTriangle size={20} /> Configuration Errors
+              </div>
+
+              {/* 1. Client-side Syntax Errors (yup) */}
+              {errors.config && (
+                <div style={{ marginBottom: (globalError || configErrors.length > 0) ? '12px' : 0 }}>
+                  <strong style={{ color: '#ff4d4f', display: 'block', marginBottom: '4px' }}>Syntax Error</strong>
+                  <div style={{ color: '#ff4d4f', fontSize: '13px', background: 'white', padding: '8px', borderRadius: '4px', borderLeft: '3px solid #ff4d4f' }}>
+                    {errors.config.message}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Server-side Global Errors (e.g. Name mismatch) */}
+              {globalError && !errors.config && (
+                <div style={{ color: '#ff4d4f', fontSize: '13px', marginBottom: configErrors.length > 0 ? '12px' : 0 }}>
+                  {globalError}
+                </div>
+              )}
+
+              {/* 3. Server-side Field Validation Errors */}
+              {configErrors.length > 0 && !errors.config && configErrors.map((fieldError) => (
+                <div
+                  key={fieldError.name}
+                  style={{ marginBottom: '8px' }}
+                >
+                  <strong style={{ fontSize: '13px' }}>{fieldError.name}</strong>
+                  <ul
+                    style={{
+                      margin: '4px 0 0 16px',
+                      padding: 0,
+                      listStyle: 'disc',
+                    }}
+                  >
+                    {fieldError.errors.map((err) => (
+                      <li
+                        key={err}
+                        style={{ color: '#ff4d4f', fontSize: '13px' }}
+                      >
+                        {err}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <Button
           buttonSize="M"
           buttonType="primary"
           type="submit"
-          disabled={!isValid || isSubmitting || !isDirty}
+          disabled={!isValid || isSubmitting}
         >
           Submit
         </Button>
