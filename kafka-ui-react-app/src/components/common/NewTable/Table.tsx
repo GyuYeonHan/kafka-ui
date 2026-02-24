@@ -52,6 +52,7 @@ export interface TableProps<TData> {
 
   // Handles row click. Can not be combined with `enableRowSelection` && expandable rows.
   onRowClick?: (row: Row<TData>) => void;
+  isRowClickable?: (row: Row<TData>) => boolean;
 
   onRowHover?: (row: Row<TData>) => void;
   onMouseLeave?: () => void;
@@ -130,6 +131,7 @@ const Table: React.FC<TableProps<any>> = ({
   emptyMessage,
   disabled,
   onRowClick,
+  isRowClickable,
   onRowHover,
   onMouseLeave,
 }) => {
@@ -181,9 +183,28 @@ const Table: React.FC<TableProps<any>> = ({
     enableRowSelection,
   });
 
+  const isClickable = (row: Row<typeof data>) => {
+    if (enableRowSelection) {
+      return false;
+    }
+
+    if (row.getCanExpand()) {
+      return true;
+    }
+
+    if (!onRowClick) {
+      return false;
+    }
+
+    if (!isRowClickable) {
+      return true;
+    }
+
+    return isRowClickable(row);
+  };
+
   const handleRowClick = (row: Row<typeof data>) => (e: React.MouseEvent) => {
-    // If row selection is enabled do not handle row click.
-    if (enableRowSelection) return undefined;
+    if (!isClickable(row)) return undefined;
 
     // If row can be expanded do not handle row click.
     if (row.getCanExpand()) {
@@ -273,10 +294,7 @@ const Table: React.FC<TableProps<any>> = ({
                   onClick={handleRowClick(row)}
                   onMouseOver={onRowHover ? handleRowHover(row) : undefined}
                   onMouseLeave={onMouseLeave ? handleMouseLeave : undefined}
-                  clickable={
-                    !enableRowSelection &&
-                    (row.getCanExpand() || onRowClick !== undefined)
-                  }
+                  clickable={isClickable(row)}
                 >
                   {!!enableRowSelection && (
                     <td key={`${row.id}-select`} style={{ width: '1px' }}>

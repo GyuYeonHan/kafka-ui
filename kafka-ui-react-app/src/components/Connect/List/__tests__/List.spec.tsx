@@ -14,6 +14,11 @@ import {
   useDeleteConnector,
   useUpdateConnectorState,
 } from 'lib/hooks/api/kafkaConnect';
+import {
+  ConnectorState,
+  ConnectorType,
+  FullConnectorInfo,
+} from 'generated-sources';
 
 const mockedUsedNavigate = jest.fn();
 const mockDelete = jest.fn();
@@ -42,6 +47,10 @@ const renderComponent = (contextValue: ContextProps = initialValue) =>
   );
 
 describe('Connectors List', () => {
+  beforeEach(() => {
+    mockedUsedNavigate.mockClear();
+  });
+
   describe('when the connectors are loaded', () => {
     beforeEach(() => {
       (useConnectors as jest.Mock).mockImplementation(() => ({
@@ -75,6 +84,60 @@ describe('Connectors List', () => {
           )
         )
       );
+    });
+
+    it('does not navigate when fetch failed connector row is clicked', async () => {
+      const fetchFailedConnector: FullConnectorInfo = {
+        connect: 'flaky-connect',
+        name: 'flaky-source',
+        connectorClass: 'FileStreamSource',
+        type: ConnectorType.SOURCE,
+        topics: [],
+        status: {
+          state: ConnectorState.FETCH_FAILED,
+        },
+        tasksCount: 0,
+        failedTasksCount: 0,
+      };
+      (useConnectors as jest.Mock).mockImplementation(() => ({
+        data: [...connectors, fetchFailedConnector],
+      }));
+
+      renderComponent();
+
+      const fetchFailedRow = screen.getByRole('row', { name: /flaky-source/i });
+      expect(fetchFailedRow).toHaveStyle('cursor: default');
+
+      await userEvent.click(fetchFailedRow);
+
+      expect(mockedUsedNavigate).not.toHaveBeenCalled();
+    });
+
+    it('does not render connect fetch error placeholder rows', async () => {
+      const connectErrorPlaceholder: FullConnectorInfo = {
+        connect: 'broken-connect',
+        name: '__connect_fetch_error__:broken-connect',
+        connectorClass: 'Connect cluster unavailable',
+        type: ConnectorType.SOURCE,
+        topics: [],
+        status: {
+          state: ConnectorState.FETCH_FAILED,
+        },
+        tasksCount: 0,
+        failedTasksCount: 0,
+      };
+      (useConnectors as jest.Mock).mockImplementation(() => ({
+        data: [...connectors, connectErrorPlaceholder],
+      }));
+
+      renderComponent();
+
+      expect(
+        screen.queryByRole('row', { name: /broken-connect/i })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Connect cluster unavailable')
+      ).not.toBeInTheDocument();
     });
   });
 

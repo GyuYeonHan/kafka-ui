@@ -9,6 +9,8 @@ const getTagColor = (state?: string) => {
     case ConnectorState.TASK_FAILED:
     case ConsumerGroupState.DEAD:
       return 'red';
+    case ConnectorState.FETCH_FAILED:
+      return 'blue';
     case ConsumerGroupState.EMPTY:
       return 'white';
     default:

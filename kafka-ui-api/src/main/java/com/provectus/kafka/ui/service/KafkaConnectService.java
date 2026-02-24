@@ -17,7 +17,9 @@ import com.provectus.kafka.ui.model.ConnectorDTO;
 import com.provectus.kafka.ui.model.ConnectorPluginConfigValidationResponseDTO;
 import com.provectus.kafka.ui.model.ConnectorPluginDTO;
 import com.provectus.kafka.ui.model.ConnectorStateDTO;
+import com.provectus.kafka.ui.model.ConnectorStatusDTO;
 import com.provectus.kafka.ui.model.ConnectorTaskStatusDTO;
+import com.provectus.kafka.ui.model.ConnectorTypeDTO;
 import com.provectus.kafka.ui.model.FullConnectorInfoDTO;
 import com.provectus.kafka.ui.model.KafkaCluster;
 import com.provectus.kafka.ui.model.NewConnectorDTO;
@@ -31,7 +33,6 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 import lombok.RequiredArgsConstructor;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -43,6 +44,9 @@ import reactor.core.publisher.Mono;
 @Slf4j
 @RequiredArgsConstructor
 public class KafkaConnectService {
+  public static final String CONNECT_FETCH_ERROR_CONNECTOR_NAME_PREFIX = "__connect_fetch_error__:";
+  private static final String CONNECT_UNAVAILABLE_PLUGIN_CLASS = "Connect cluster unavailable";
+
   private final ClusterMapper clusterMapper;
   private final KafkaConnectMapper kafkaConnectMapper;
   private final ObjectMapper objectMapper;
@@ -60,26 +64,83 @@ public class KafkaConnectService {
                                                      @Nullable final String search) {
     return getConnects(cluster)
         .flatMap(connect ->
-            getConnectorNamesWithErrorsSuppress(cluster, connect.getName())
+            getConnectorNames(cluster, connect.getName())
                 .flatMap(connectorName ->
                     Mono.zip(
-                        getConnector(cluster, connect.getName(), connectorName),
-                        getConnectorConfig(cluster, connect.getName(), connectorName),
-                        getConnectorTasks(cluster, connect.getName(), connectorName).collectList(),
+                        getConnector(cluster, connect.getName(), connectorName)
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(new ConnectorDTO()
+                                  .name(connectorName)
+                                  .connect(connect.getName())
+                                  .type(ConnectorTypeDTO.SOURCE)
+                                  .status(new ConnectorStatusDTO()
+                                      .state(ConnectorStateDTO.FETCH_FAILED))
+                                  .tasks(List.of())
+                                  .config(Map.of()));
+                            }),
+                        getConnectorConfig(cluster, connect.getName(), connectorName)
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch config for connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(Map.of());
+                            }),
+                        getConnectorTasks(cluster, connect.getName(), connectorName)
+                            .collectList()
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch tasks for connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(List.of());
+                            }),
                         getConnectorTopics(cluster, connect.getName(), connectorName)
+                            .onErrorResume(e -> {
+                              log.error("Failed to fetch topics for connector {} in cluster {}",
+                                  connectorName, connect.getName(), e);
+                              return Mono.just(new ConnectorTopics().topics(List.of()));
+                            })
                     ).map(tuple ->
                         InternalConnectInfo.builder()
                             .connector(tuple.getT1())
                             .config(tuple.getT2())
                             .tasks(tuple.getT3())
                             .topics(tuple.getT4().getTopics())
-                            .build())))
+                            .build()))
+                .onErrorResume(e -> {
+                  log.error("Failed to fetch connectors for connect {} in cluster {}",
+                      connect.getName(), cluster.getName(), e);
+                  return Flux.just(connectFetchErrorInfo(connect.getName()));
+                }))
         .map(kafkaConnectMapper::fullConnectorInfo)
+        .onErrorContinue((error, value) ->
+            log.error("Failed to build full connector info from {}", value, error))
         .filter(matchesSearchTerm(search));
   }
 
+  private InternalConnectInfo connectFetchErrorInfo(String connectName) {
+    return InternalConnectInfo.builder()
+        .connector(new ConnectorDTO()
+            .name(connectFetchErrorConnectorName(connectName))
+            .connect(connectName)
+            .status(new ConnectorStatusDTO().state(ConnectorStateDTO.FETCH_FAILED))
+            .tasks(List.of())
+            .config(Map.of()))
+        .config(Map.of("connector.class", CONNECT_UNAVAILABLE_PLUGIN_CLASS))
+        .tasks(List.of())
+        .topics(List.of())
+        .build();
+  }
+
+  public static String connectFetchErrorConnectorName(String connectName) {
+    return CONNECT_FETCH_ERROR_CONNECTOR_NAME_PREFIX + connectName;
+  }
+
+  public static boolean isConnectFetchErrorPlaceholder(@Nullable String connectorName) {
+    return connectorName != null && connectorName.startsWith(CONNECT_FETCH_ERROR_CONNECTOR_NAME_PREFIX);
+  }
+
   private Predicate<FullConnectorInfoDTO> matchesSearchTerm(@Nullable final String search) {
-    if (search == null) {
+    if (StringUtils.isBlank(search)) {
       return c -> true;
     }
     return connector -> getStringsForSearch(connector)
@@ -88,10 +149,15 @@ public class KafkaConnectService {
 
   private Stream<String> getStringsForSearch(FullConnectorInfoDTO fullConnectorInfo) {
     return Stream.of(
-        fullConnectorInfo.getName(),
-        fullConnectorInfo.getConnect(),
-        fullConnectorInfo.getStatus().getState().getValue(),
-        fullConnectorInfo.getType().getValue());
+        StringUtils.defaultString(fullConnectorInfo.getName()),
+        StringUtils.defaultString(fullConnectorInfo.getConnect()),
+        Optional.ofNullable(fullConnectorInfo.getStatus())
+            .map(ConnectorStatusDTO::getState)
+            .map(ConnectorStateDTO::getValue)
+            .orElse(StringUtils.EMPTY),
+        Optional.ofNullable(fullConnectorInfo.getType())
+            .map(ConnectorTypeDTO::getValue)
+            .orElse(StringUtils.EMPTY));
   }
 
   public Mono<ConnectorTopics> getConnectorTopics(KafkaCluster cluster, String connectClusterName,
@@ -107,10 +173,9 @@ public class KafkaConnectService {
   public Flux<String> getConnectorNames(KafkaCluster cluster, String connectName) {
     return api(cluster, connectName)
         .flux(client -> client.getConnectors(null))
-        // for some reason `getConnectors` method returns the response as a single string
-        .collectList().map(e -> e.get(0))
-        .map(this::parseConnectorsNamesStringToList)
-        .flatMapMany(Flux::fromIterable);
+        // for some reason `getConnectors` method can return the whole JSON array as a single string
+        .collectList()
+        .flatMapMany(this::extractConnectorNames);
   }
 
   // returns empty flux if there was an error communicating with Connect
@@ -118,10 +183,33 @@ public class KafkaConnectService {
     return getConnectorNames(cluster, connectName).onErrorComplete();
   }
 
-  @SneakyThrows
+  private Flux<String> extractConnectorNames(List<String> connectorNamesResponse) {
+    if (connectorNamesResponse.isEmpty()) {
+      return Flux.empty();
+    }
+
+    if (connectorNamesResponse.size() == 1) {
+      var response = StringUtils.trimToEmpty(connectorNamesResponse.get(0));
+      if (StringUtils.startsWith(response, "[")) {
+        try {
+          return Flux.fromIterable(parseConnectorsNamesStringToList(response));
+        } catch (RuntimeException e) {
+          log.error("Failed to parse connectors list from Connect response: {}", response, e);
+          return Flux.empty();
+        }
+      }
+    }
+
+    return Flux.fromIterable(connectorNamesResponse);
+  }
+
   private List<String> parseConnectorsNamesStringToList(String json) {
-    return objectMapper.readValue(json, new TypeReference<>() {
-    });
+    try {
+      return objectMapper.readValue(json, new TypeReference<>() {
+      });
+    } catch (Exception e) {
+      throw new IllegalStateException("Failed to parse connectors response: " + json, e);
+    }
   }
 
   public Mono<ConnectorDTO> createConnector(KafkaCluster cluster, String connectName,
