@@ -9,6 +9,11 @@ import { screen, within } from '@testing-library/react';
 import { render, WithRoute } from 'lib/testHelpers';
 import { clusterConnectorsPath } from 'lib/paths';
 import { useConnectors } from 'lib/hooks/api/kafkaConnect';
+import {
+  ConnectorState,
+  ConnectorType,
+  FullConnectorInfo,
+} from 'generated-sources';
 
 jest.mock('components/Connect/List/List', () => () => (
   <div>Connectors List</div>
@@ -96,7 +101,7 @@ describe('Connectors List Page', () => {
         'Total number of connectors'
       );
       expect(connectorsIndicator).toBeInTheDocument();
-      expect(connectorsIndicator).toHaveTextContent('Connectors -');
+      expect(connectorsIndicator).toHaveTextContent('Connectors 0');
 
       const failedConnectorsIndicator = within(metrics).getByTitle(
         'Number of failed connectors'
@@ -176,6 +181,55 @@ describe('Connectors List Page', () => {
       );
       expect(failedTasksIndicator).toBeInTheDocument();
       expect(failedTasksIndicator).toHaveTextContent('Failed Tasks 1');
+    });
+
+    it('renders warning and unknown metrics when connect cluster lookup fails', async () => {
+      const connectErrorPlaceholder: FullConnectorInfo = {
+        connect: 'broken-connect',
+        name: '__connect_fetch_error__:broken-connect',
+        connectorClass: 'Connect cluster unavailable',
+        type: ConnectorType.SOURCE,
+        topics: [],
+        status: {
+          state: ConnectorState.FETCH_FAILED,
+        },
+        tasksCount: 0,
+        failedTasksCount: 0,
+      };
+      (useConnectors as jest.Mock).mockImplementation(() => ({
+        isLoading: false,
+        data: [...connectors, connectErrorPlaceholder],
+      }));
+
+      await renderComponent();
+
+      expect(
+        screen.getByText('Connect cluster lookup failed')
+      ).toBeInTheDocument();
+      expect(screen.getByText(/broken-connect/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Connect cluster unavailable/i)
+      ).toBeInTheDocument();
+
+      const metrics = screen.getByRole('group');
+      expect(metrics).toBeInTheDocument();
+
+      const connectorsIndicator = within(metrics).getByTitle(
+        'Unknown while one or more Connect clusters are unavailable'
+      );
+      expect(connectorsIndicator).toHaveTextContent('Connectors -');
+
+      const failedConnectorsIndicator = within(metrics).getByTitle(
+        'Number of failed connectors'
+      );
+      expect(failedConnectorsIndicator).toHaveTextContent(
+        'Failed Connectors -'
+      );
+
+      const failedTasksIndicator = within(metrics).getByTitle(
+        'Number of failed tasks'
+      );
+      expect(failedTasksIndicator).toHaveTextContent('Failed Tasks -');
     });
   });
 });

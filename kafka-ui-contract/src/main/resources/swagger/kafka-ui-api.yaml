@@ -3274,6 +3274,7 @@ components:
       enum:
         - RUNNING
         - FAILED
+        - FETCH_FAILED
         - PAUSED
         - UNASSIGNED
         - TASK_FAILED

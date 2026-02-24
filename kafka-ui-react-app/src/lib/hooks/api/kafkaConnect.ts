@@ -56,6 +56,8 @@ export function useConnectors(clusterName: ClusterName, search?: string) {
     () => api.getAllConnectors({ clusterName, search }),
     {
       select: (data) => sortBy(data, 'name'),
+      suspense: false,
+      keepPreviousData: true,
     }
   );
 }

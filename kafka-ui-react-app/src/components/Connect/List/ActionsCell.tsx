@@ -17,11 +17,16 @@ import {
 import { useConfirm } from 'lib/hooks/useConfirm';
 import { useIsMutating } from '@tanstack/react-query';
 import { ActionDropdownItem } from 'components/common/ActionComponent';
+import { isConnectFetchErrorPlaceholder } from 'components/Connect/connectFetchError';
 
 const ActionsCell: React.FC<CellContext<FullConnectorInfo, unknown>> = ({
   row,
 }) => {
   const { connect, name, status } = row.original;
+  if (isConnectFetchErrorPlaceholder(name)) {
+    return null;
+  }
+
   const { clusterName } = useAppParams<ClusterNameRoute>();
   const mutationsNumber = useIsMutating();
   const isMutating = mutationsNumber > 0;
