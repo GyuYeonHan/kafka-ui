@@ -16,7 +16,9 @@ const MAX_LENGTH = 100;
 
 const Tasks: React.FC = () => {
   const routerProps = useAppParams<RouterParamsClusterConnectConnector>();
-  const { data = [] } = useConnectorTasks(routerProps);
+  const { data = [], isError, isLoading, isFetching } =
+    useConnectorTasks(routerProps);
+  const isTasksLoading = isLoading || (isFetching && data.length === 0);
 
   const columns = React.useMemo<ColumnDef<Task>[]>(
     () => [
@@ -47,8 +49,14 @@ const Tasks: React.FC = () => {
   return (
     <Table
       columns={columns}
-      data={data}
-      emptyMessage="No tasks found"
+      data={isTasksLoading ? [] : data}
+      emptyMessage={
+        isTasksLoading
+          ? 'Loading tasks...'
+          : isError
+          ? 'Failed to load tasks. Please check connector status.'
+          : 'No tasks found'
+      }
       enableSorting
       getRowCanExpand={(row) => row.original.status.trace?.length > 0}
       renderSubComponent={ExpandedTaskRow}

@@ -7,6 +7,7 @@ import { RouterParamsClusterConnectConnector } from 'lib/paths';
 import yup from 'lib/yupExtended';
 import Editor from 'components/common/Editor/Editor';
 import { Button } from 'components/common/Button/Button';
+import { FormError } from 'components/common/Input/Input.styled';
 import {
   useConnectorConfig,
   useUpdateConnectorConfig,
@@ -25,10 +26,42 @@ interface FormValues {
   config: string;
 }
 
+const getErrorMessage = async (error: unknown): Promise<string> => {
+  if (error instanceof Response) {
+    try {
+      const body = await error.json();
+      if (body?.message) {
+        return body.message;
+      }
+    } catch {
+      // do nothing
+    }
+    return `${error.status} ${error.statusText}`;
+  }
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+
+  return 'Failed to update connector config';
+};
+
 const Config: React.FC = () => {
   const routerParams = useAppParams<RouterParamsClusterConnectConnector>();
-  const { data: config } = useConnectorConfig(routerParams);
+  const {
+    data: config,
+    isError: isConfigError,
+    isLoading: isConfigLoading,
+    isFetching: isConfigFetching,
+  } = useConnectorConfig(routerParams);
+  const isConfigPending = isConfigLoading || (isConfigFetching && !config);
   const mutation = useUpdateConnectorConfig(routerParams);
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   const {
     handleSubmit,
@@ -40,7 +73,7 @@ const Config: React.FC = () => {
     mode: 'onChange',
     resolver: yupResolver(validationSchema),
     defaultValues: {
-      config: JSON.stringify(config, null, '\t'),
+      config: JSON.stringify(config || {}, null, '\t'),
     },
   });
 
@@ -51,21 +84,41 @@ const Config: React.FC = () => {
   }, [config, setValue]);
 
   const onSubmit = async (values: FormValues) => {
+    setSubmitError(null);
     try {
       const requestBody = JSON.parse(values.config.trim());
       await mutation.mutateAsync(requestBody);
       reset(values);
     } catch (e) {
-      // do nothing
+      setSubmitError(await getErrorMessage(e));
     }
   };
 
-  const hasCredentials = JSON.stringify(config, null, '\t').includes(
-    '"******"'
-  );
+  if (isConfigPending && !config) {
+    return (
+      <ConnectEditWrapperStyled>
+        <FormError>Loading connector config...</FormError>
+      </ConnectEditWrapperStyled>
+    );
+  }
+
+  if (isConfigError && !config) {
+    return (
+      <ConnectEditWrapperStyled>
+        <FormError>
+          Failed to load connector config. Please check connector status and try
+          again.
+        </FormError>
+      </ConnectEditWrapperStyled>
+    );
+  }
+
+  const prettyConfig = JSON.stringify(config || {}, null, '\t');
+  const hasMaskedCredentials = prettyConfig.includes('"******"');
+
   return (
     <ConnectEditWrapperStyled>
-      {hasCredentials && (
+      {hasMaskedCredentials && (
         <ConnectEditWarningMessageStyled>
           Please replace ****** with the real credential values to avoid
           accidentally breaking your connector config!
@@ -84,6 +137,7 @@ const Config: React.FC = () => {
         <div>
           <ErrorMessage errors={errors} name="config" />
         </div>
+        {submitError && <FormError>{submitError}</FormError>}
         <Button
           buttonSize="M"
           buttonType="primary"

@@ -52,6 +52,8 @@ describe('Overview', () => {
       expect(screen.getByText(2)).toBeInTheDocument();
       expect(screen.getByText('Tasks Failed')).toBeInTheDocument();
       expect(screen.getByText(1)).toBeInTheDocument();
+      expect(screen.getByText('Last Failure')).toBeInTheDocument();
+      expect(screen.getByText('Failure 1')).toBeInTheDocument();
     });
   });
 });

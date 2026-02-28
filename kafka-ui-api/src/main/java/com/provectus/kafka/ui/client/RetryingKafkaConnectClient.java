@@ -2,6 +2,8 @@ package com.provectus.kafka.ui.client;
 
 import static com.provectus.kafka.ui.config.ClustersProperties.ConnectCluster;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.provectus.kafka.ui.config.ClustersProperties;
 import com.provectus.kafka.ui.connect.ApiClient;
 import com.provectus.kafka.ui.connect.api.KafkaConnectClientApi;
@@ -21,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.unit.DataSize;
 import org.springframework.web.client.RestClientException;
@@ -34,6 +37,8 @@ import reactor.util.retry.Retry;
 public class RetryingKafkaConnectClient extends KafkaConnectClientApi {
   private static final int MAX_RETRIES = 5;
   private static final Duration RETRIES_DELAY = Duration.ofMillis(200);
+  private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
   public RetryingKafkaConnectClient(ConnectCluster config,
                                     @Nullable ClustersProperties.TruststoreConfig truststoreConfig,
@@ -61,9 +66,29 @@ public class RetryingKafkaConnectClient extends KafkaConnectClientApi {
   private static <T> Mono<T> withBadRequestErrorHandling(Mono<T> publisher) {
     return publisher
         .onErrorResume(WebClientResponseException.BadRequest.class, e ->
-            Mono.error(new ValidationException("Invalid configuration")))
+            Mono.error(new ValidationException(extractConnectErrorMessage(e), e)))
         .onErrorResume(WebClientResponseException.InternalServerError.class, e ->
-            Mono.error(new ValidationException("Invalid configuration")));
+            Mono.error(new ValidationException(extractConnectErrorMessage(e), e)));
+  }
+
+  private static String extractConnectErrorMessage(WebClientResponseException exception) {
+    String body = exception.getResponseBodyAsString();
+    if (StringUtils.isBlank(body)) {
+      return "Invalid configuration";
+    }
+
+    try {
+      Map<String, Object> payload =
+          OBJECT_MAPPER.readValue(body, new TypeReference<>() {
+          });
+      Object message = payload.get("message");
+      if (message instanceof String msg && StringUtils.isNotBlank(msg)) {
+        return msg;
+      }
+    } catch (Exception ignored) {
+      // fallback to raw response body
+    }
+    return body;
   }
 
   @Override
@@ -278,6 +303,7 @@ public class RetryingKafkaConnectClient extends KafkaConnectClientApi {
               config.getPassword()
           )
           .configureBufferSize(maxBuffSize)
+          .configureResponseTimeout(REQUEST_TIMEOUT)
           .build();
     }
   }

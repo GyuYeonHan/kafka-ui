@@ -82,14 +82,14 @@ describe('Connectors List Page', () => {
       }));
 
       await renderComponent();
-      const metrics = screen.getByRole('group');
+      const metrics = screen.getAllByRole('group')[0];
       expect(metrics).toBeInTheDocument();
       expect(within(metrics).getAllByText('progressbar').length).toEqual(3);
     });
 
     it('renders indicators for empty list of connectors', async () => {
       await renderComponent();
-      const metrics = screen.getByRole('group');
+      const metrics = screen.getAllByRole('group')[0];
       expect(metrics).toBeInTheDocument();
 
       const connectorsIndicator = within(metrics).getByTitle(
@@ -120,7 +120,7 @@ describe('Connectors List Page', () => {
       }));
 
       await renderComponent();
-      const metrics = screen.getByRole('group');
+      const metrics = screen.getAllByRole('group')[0];
       expect(metrics).toBeInTheDocument();
 
       const connectorsIndicator = within(metrics).getByTitle(
@@ -152,7 +152,7 @@ describe('Connectors List Page', () => {
 
       await renderComponent();
 
-      const metrics = screen.getByRole('group');
+      const metrics = screen.getAllByRole('group')[0];
       expect(metrics).toBeInTheDocument();
 
       const connectorsIndicator = within(metrics).getByTitle(
@@ -176,6 +176,10 @@ describe('Connectors List Page', () => {
       );
       expect(failedTasksIndicator).toBeInTheDocument();
       expect(failedTasksIndicator).toHaveTextContent('Failed Tasks 1');
+
+      expect(screen.getByText('Connect Health')).toBeInTheDocument();
+      expect(screen.getByText('Connect: first')).toBeInTheDocument();
+      expect(screen.getByText('Connect: second')).toBeInTheDocument();
     });
   });
 });

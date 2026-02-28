@@ -232,7 +232,13 @@ public class KafkaConnectServiceTests extends AbstractIntegrationTest {
             ))
         )
         .exchange()
-        .expectStatus().isBadRequest();
+        .expectStatus().isBadRequest()
+        .expectBody()
+        .jsonPath("$.message")
+        .value(message ->
+            assertThat(message.toString())
+                .isNotBlank()
+                .isNotEqualTo("Invalid configuration"));
 
     webTestClient.get()
         .uri("/api/clusters/{clusterName}/connects/{connectName}/connectors", LOCAL, connectName)
@@ -255,7 +261,13 @@ public class KafkaConnectServiceTests extends AbstractIntegrationTest {
             ))
         )
         .exchange()
-        .expectStatus().isBadRequest();
+        .expectStatus().isBadRequest()
+        .expectBody()
+        .jsonPath("$.message")
+        .value(message ->
+            assertThat(message.toString())
+                .isNotBlank()
+                .isNotEqualTo("Invalid configuration"));
 
     webTestClient.get()
         .uri("/api/clusters/{clusterName}/connects/{connectName}/connectors", LOCAL, connectName)
@@ -280,7 +292,13 @@ public class KafkaConnectServiceTests extends AbstractIntegrationTest {
             )
         )
         .exchange()
-        .expectStatus().isBadRequest();
+        .expectStatus().isBadRequest()
+        .expectBody()
+        .jsonPath("$.message")
+        .value(message ->
+            assertThat(message.toString())
+                .isNotBlank()
+                .isNotEqualTo("Invalid configuration"));
 
     webTestClient.get()
         .uri("/api/clusters/{clusterName}/connects/{connectName}/connectors/{connectorName}/config",
@@ -309,7 +327,13 @@ public class KafkaConnectServiceTests extends AbstractIntegrationTest {
             )
         )
         .exchange()
-        .expectStatus().isBadRequest();
+        .expectStatus().isBadRequest()
+        .expectBody()
+        .jsonPath("$.message")
+        .value(message ->
+            assertThat(message.toString())
+                .isNotBlank()
+                .isNotEqualTo("Invalid configuration"));
 
     webTestClient.get()
         .uri("/api/clusters/{clusterName}/connects/{connectName}/connectors/{connectorName}/config",

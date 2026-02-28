@@ -61,11 +61,9 @@ describe('Connectors List', () => {
 
     it('opens broker when row clicked', async () => {
       renderComponent();
-      await userEvent.click(
-        screen.getByRole('row', {
-          name: 'hdfs-source-connector first SOURCE FileStreamSource a b c RUNNING 2 of 2',
-        })
-      );
+      const row = screen.getByText('hdfs-source-connector').closest('tr');
+      expect(row).toBeInTheDocument();
+      await userEvent.click(row as HTMLElement);
       await waitFor(() =>
         expect(mockedUsedNavigate).toBeCalledWith(
           clusterConnectConnectorPath(
